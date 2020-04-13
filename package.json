@@ -1,0 +1,30 @@
+{
+  "name": "flat-geo-css",
+  "version": "1.0.0",
+  "description": "flat-geo-css",
+  "main": "index.js",
+  "scripts": {
+    "compile": "eslint --ext .js src/ && jest && webpack --config webpack.config.js",
+    "test": "jest --watchAll"
+  },
+  "author": "allyoucanmap",
+  "license": "ISC",
+  "devDependencies": {
+    "@babel/core": "7.9.0",
+    "@babel/plugin-proposal-nullish-coalescing-operator": "7.8.3",
+    "@babel/plugin-proposal-optional-chaining": "7.9.0",
+    "@babel/preset-env": "7.9.5",
+    "babel-eslint": "10.1.0",
+    "babel-jest": "25.3.0",
+    "babel-loader": "8.1.0",
+    "clean-webpack-plugin": "3.0.0",
+    "eslint": "6.8.0",
+    "jest": "25.3.0",
+    "webpack": "4.42.1",
+    "webpack-cli": "3.3.11"
+  },
+  "dependencies": {
+    "@babel/polyfill": "7.8.7",
+    "moo": "0.5.1"
+  }
+}
