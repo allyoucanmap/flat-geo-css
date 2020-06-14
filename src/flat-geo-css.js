@@ -53,6 +53,7 @@ const URL = '(?:' +
     '|' + SIMPLE_URL +
     ')';
 const URL_FUNCTION = `url${OPTIONAL_WHITESPACE}\\(${OPTIONAL_WHITESPACE}${URL}${OPTIONAL_WHITESPACE}\\)`;
+const SYMBOL_FUNCTION = `symbol${OPTIONAL_WHITESPACE}\\(${OPTIONAL_WHITESPACE}${URL}${OPTIONAL_WHITESPACE}\\)`;
 const HEX = '[a-fA-F0-9]';
 const COLOR = `#(?:${HEX}${HEX}${HEX}${HEX}${HEX}${HEX}|${HEX}${HEX}${HEX})`;
 const MEASURE = `${DIGIT}{1,}(?:\\.${DIGIT}{0,}|)(?:k|M|G|px|m|ft|%|deg|)`;
@@ -81,6 +82,7 @@ const TEXT = `(?:${MIXED_EXPRESSION}|${STRING_VALUE}){1,}`;
 const SIMPLE_VALUE = '(?:' +
     NONE +
     '|' + URL_FUNCTION +
+    '|' + SYMBOL_FUNCTION +
     '|' + TRANSFORM_FUNCTION +
     '|' + COLOR +
     // '|' + NAMED_COLOR +
@@ -263,6 +265,10 @@ function getPropertyValue(value) {
     if (value.match(new RegExp(URL_FUNCTION))) {
         const url = value.replace(new RegExp(`url${OPTIONAL_WHITESPACE}\\(${OPTIONAL_WHITESPACE}(${URL})${OPTIONAL_WHITESPACE}\\)`, 'g'), '$1');
         return ['url', url.replace(/'(.*?)'/g, '$1')];
+    }
+    if (value.match(new RegExp(SYMBOL_FUNCTION))) {
+        const symbol = value.replace(new RegExp(`symbol${OPTIONAL_WHITESPACE}\\(${OPTIONAL_WHITESPACE}(${URL})${OPTIONAL_WHITESPACE}\\)`, 'g'), '$1');
+        return ['symbol', symbol.replace(/'(.*?)'/g, '$1')];
     }
     if (value.match(new RegExp(MIXED_EXPRESSION)) && !value.match(new RegExp(STRING_VALUE))) {
         const content = value.replace(new RegExp(`\\[${OPTIONAL_WHITESPACE}([^\\[;]*?)${OPTIONAL_WHITESPACE}\\]`, 'g'), '$1');
@@ -771,8 +777,10 @@ function getPseudoSelectorByIndex(selector, idx) {
 }
 
 function splitProperties(rules) {
+    let group = 0;
     return rules
         .reduce((newRules, rule) => {
+            group++;
             const propertiesKeys = Object.keys(rule?.properties);
             const maxCountOfValues = Math.max.apply(null,
                 propertiesKeys
@@ -810,7 +818,8 @@ function splitProperties(rules) {
                 ...newRules,
                 ...split.map((properties) => ({
                     ...rule,
-                    properties
+                    properties,
+                    group
                 }))
             ];
         }, []);
@@ -846,6 +855,9 @@ export function read(styleSheet) {
 }
 
 function writeExpression(expression, options) {
+    if (expression === undefined) {
+        return undefined;
+    }
     if (typeof expression === 'string' || expression instanceof String) {
         return `'${expression}'`;
     }
@@ -898,6 +910,9 @@ function writeExpression(expression, options) {
         case 'interpolate':
         case 'env':
             return `${operator}(${args.map(arg => writeExpression(arg)).join(', ')})`;
+        case 'url':
+        case 'symbol':
+            return `${operator}(${args[0]})`;
         case 'get':
             return args[0];
         case 'brace':
@@ -913,11 +928,57 @@ function writeExpression(expression, options) {
     }
 }
 
+function groupByRuleGroupId(rules) {
+    let newRules = [];
+    for (let i = 0; i < rules.length; i++) {
+      const rule = rules[i];
+      const lastGroup = newRules[newRules.length - 1] || {};
+      const lastGroupId = lastGroup.group;
+      if (lastGroupId !== undefined && lastGroupId === rule.group) {
+        newRules[newRules.length - 1] = {
+          ...lastGroup,
+          properties: [
+            ...(Array.isArray(lastGroup.properties)
+                ? lastGroup.properties
+                : [lastGroup.properties]),
+            rule.properties
+          ]
+        };
+      } else {
+        newRules.push(rule);
+      }
+    }
+    return newRules;
+}
+
+function writeValue(values, isPseudoSelector) {
+    if (isPseudoSelector) {
+        const propertiesGroups = Array.isArray(values)
+            ? values
+            : [ values ];
+        const propertiesKeys = Object.keys(propertiesGroups[0]);
+        return propertiesKeys.reduce((acc, key) => {
+            return {
+                ...acc,
+                [key]: writeValue(propertiesGroups.map((properties) => properties[key]))
+            };
+        }, {});
+    }
+    const arrayValues = values.filter((value) => value !== undefined && value !== null);
+    if (arrayValues.length === 1 || arrayValues.every((value, idx, arr) => value === arr[0])) {
+        return arrayValues[0];
+    }
+    return arrayValues.join(', ');
+}
+
 function writeExpressions(rules) {
     return (rules || []).map((rule) => {
         const minScale = rule?.['min-scale'] && writeExpression(rule['min-scale']);
         const maxScale = rule?.['max-scale'] && writeExpression(rule['max-scale']);
-        const properties = rule?.properties || {};
+        const propertiesGroups = Array.isArray(rule.properties)
+            ? rule.properties
+            : [ rule.properties ];
+        const propertiesKeys = Object.keys(propertiesGroups[0]);
         return {
             ...(rule?.title && { title: `/* @title ${rule.title} */`}),
             ...(rule?.layer && { layer: rule.layer }),
@@ -932,21 +993,21 @@ function writeExpressions(rules) {
                             ...(maxScale && ['[' +maxScale + ']'] || [])
                     ])
                 : rule.selector,
-            properties: Object.keys(properties)
+            properties: propertiesKeys
                 .reduce((acc, key) => {
                     if (key.match(new RegExp(`(?:${PSEUDO_CLASS_SELECTOR}|${NUMBERED_PSEUDO_CLASS_SELECTOR})`))) {
                         return {
                             ...acc,
-                            [key]: Object.keys(properties[key])
+                            [key]: writeValue(propertiesGroups.map((properties) => Object.keys(properties[key])
                                 .reduce((_acc, _key) => ({
                                     ..._acc,
                                     [_key]: writeExpression(properties[key][_key])
-                                }), {})
+                                }), {})), true)
                         };
                     }
                     return {
                         ...acc,
-                        [key]: writeExpression(properties[key])
+                        [key]: writeValue(propertiesGroups.map((properties) => writeExpression(properties[key])))
                     };
                 }, {})
         };
@@ -1032,6 +1093,7 @@ export function write(styleJSON) {
             return acc + key + ' \'' + styleJSON.directive[key] + '\';\n';
         }, '');
     const rules = pipe(
+        groupByRuleGroupId,
         writeExpressions,
         groupByLayer,
         writeRules
