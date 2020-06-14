@@ -2,7 +2,7 @@
   "name": "flat-geo-css",
   "version": "1.0.0",
   "description": "flat-geo-css",
-  "main": "index.js",
+  "main": "dist/flat-geo-css.js",
   "scripts": {
     "lint": "eslint --ext .js src/",
     "compile": "webpack --config webpack.config.js",
