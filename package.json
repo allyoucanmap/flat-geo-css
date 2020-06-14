@@ -4,8 +4,15 @@
   "description": "flat-geo-css",
   "main": "index.js",
   "scripts": {
-    "compile": "eslint --ext .js src/ && jest && webpack --config webpack.config.js",
-    "test": "jest --watchAll"
+    "lint": "eslint --ext .js src/",
+    "compile": "webpack --config webpack.config.js",
+    "test": "jest",
+    "test:loop": "jest --watchAll",
+    "prepare": "npm run compile",
+    "prepublishOnly": "npm test && npm run lint",
+    "preversion": "npm run lint",
+    "version": "git add -A src",
+    "postversion": "git push && git push --tags"
   },
   "author": "allyoucanmap",
   "license": "ISC",
