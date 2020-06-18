@@ -89,8 +89,8 @@ const SIMPLE_VALUE = '(?:' +
     '|' + MEASURE +
     '|' + IDENTIFIER + // Value Identifier
     '|' + VARIABLE_VALUE +
-    '|' + MIXED_EXPRESSION +
     '|' + TEXT +
+    '|' + MIXED_EXPRESSION +
     ')';
 const MULTI_VALUE = `${SIMPLE_VALUE}(?:${WHITESPACE}${SIMPLE_VALUE}){1,}`;
 const VALUE = '(?:' +
@@ -113,17 +113,30 @@ const PROPERTY = '' +
     + ';';
 
 const DIRECTIVE = `@(?:mode|styleTitle|styleAbstract)${WHITESPACE}${SINGLE_QUOTE_STRING};`
-const OPERATOR = `${WHITESPACE}(?:in|not in|\\=|\\>|\\>\\=|\\<|\\<\\=|\\<\\>)${WHITESPACE}`;
+const OPERATOR = `${WHITESPACE}(?:in|IN|not in|NOT IN|is|IS|like|ilike|LIKE|ILIKE|\\=|\\>|\\>\\=|\\<|\\<\\=|\\<\\>)${WHITESPACE}`;
 
 function parseSelectorValue(value) {
     const isString = !!value.match(/'/g);
-    return isString
-        ? value.replace(new RegExp(`\\'([^\\"|\\'|\\[|\\]]{0,})\\'`, 'g'), '$1')
-        : parseFloat(value);
+    if (isString) {
+        return value.replace(new RegExp(`\\'([^\\"|\\'|\\[|\\]]{0,})\\'`, 'g'), '$1');
+    }
+    const numberValue = parseFloat(value);
+
+    if (!isNaN(numberValue)) {
+        return numberValue;
+    }
+
+    const trimValue = value.trim();
+
+    if (trimValue === 'true' || trimValue === 'false') {
+        return ['bool', trimValue];
+    }
+
+    return trimValue;
 }
 
 function getSelectorValue(value) {
-    if (value.match(new RegExp(CATCH_ALL_SELECTOR))) {
+    if (value.match(new RegExp(CATCH_ALL_SELECTOR)) && !value.match(new RegExp(ECQL_SELECTOR))) {
         return {
             value,
             type: 'allSelector'
@@ -193,7 +206,11 @@ function getSelectorValue(value) {
             '>=': '>=',
             '<': '<',
             '<=': '<=',
-            '<>': '!='
+            '<>': '!=',
+            'like': 'like',
+            'ilike': 'ilike',
+            'LIKE': 'like',
+            'ILIKE': 'ilike'
         };
 
         const OR = `${WHITESPACE}(?:or|OR)${WHITESPACE}`;
@@ -220,8 +237,17 @@ function getSelectorValue(value) {
                         parseSelectorValue(operand[1])
                     ];
                 }
+                if ((operator === 'is' || operator === 'IS')
+                && (operand[1] === 'null' || operand[1] === 'NULL')) {
+                    return [
+                        'isnull',
+                        ['get', operand[0]]
+                    ];
+                }
                 if (operator === 'in'
-                || operator === 'not in') {
+                || operator === 'not in'
+                || operator === 'IN'
+                || operator === 'NOT IN') {
                     const literal = operand[1]
                         .replace(/\(|\)/g, '')
                         .split(',')
@@ -231,7 +257,7 @@ function getSelectorValue(value) {
                         ['get', operand[0]],
                         ['literal', literal]
                     ];
-                    return operator === 'not in'
+                    return (operator === 'not in' || operator === 'NOT IN')
                         ? ['!', inExpression]
                         : inExpression
                 }
@@ -257,8 +283,8 @@ function getSelectorValue(value) {
     };
 }
 
-function getPropertyValue(value) {
-    if (value.match(MULTI_VALUE)) {
+function getPropertyValue(value, key) {
+    if (value.match(new RegExp(MULTI_VALUE))) {
         const values = value.match(new RegExp(SIMPLE_VALUE, 'g'));
         return ['array', ...values.map(val => getPropertyValue(val))]
     }
@@ -270,7 +296,7 @@ function getPropertyValue(value) {
         const symbol = value.replace(new RegExp(`symbol${OPTIONAL_WHITESPACE}\\(${OPTIONAL_WHITESPACE}(${URL})${OPTIONAL_WHITESPACE}\\)`, 'g'), '$1');
         return ['symbol', symbol.replace(/'(.*?)'/g, '$1')];
     }
-    if (value.match(new RegExp(MIXED_EXPRESSION)) && !value.match(new RegExp(STRING_VALUE))) {
+    if (value.match(new RegExp(MIXED_EXPRESSION)) && key !== 'label') {
         const content = value.replace(new RegExp(`\\[${OPTIONAL_WHITESPACE}([^\\[;]*?)${OPTIONAL_WHITESPACE}\\]`, 'g'), '$1');
         const operator = content.match(new RegExp(`${VALUE}(?:${WHITESPACE}(\\*|\\/|\\+|\\-)${WHITESPACE}${VALUE}){0,}`))?.[1];
         const operands = content.match(new RegExp(VALUE, 'g'));
@@ -358,7 +384,7 @@ let lexer = moo.compile({
                 .replace(new RegExp(WHITE_SPACE_OR_COMMENT), '')
                 .replace(new RegExp(IDENTIFIER + OPTIONAL_WHITESPACE + COLON), '')
                 .match(new RegExp(`${SIMPLE_VALUE}(?:${WHITESPACE}${SIMPLE_VALUE}){0,}`, 'g'))
-                .map(val => getPropertyValue(val));
+                .map(val => getPropertyValue(val, key));
             return {
                 comment,
                 key,
@@ -871,7 +897,11 @@ function writeExpression(expression, options) {
         '>=': '>=',
         '<': '<',
         '<=': '<=',
-        '!=': '<>'
+        '!=': '<>',
+        'like': 'like',
+        'ilike': 'ilike',
+        'LIKE': 'like',
+        'ILIKE': 'ilike'
     };
     switch (operator) {
         case '+':
@@ -883,12 +913,16 @@ function writeExpression(expression, options) {
             return args.map((arg) => writeExpression(arg)).join(' or ');
         case 'all':
             return args.map((arg) => writeExpression(arg)).join(' and ');
+        case 'isnull':
+            return writeExpression(args[0]) + ' is null';
         case '>':
         case '<':
         case '>=':
         case '<=':
         case '!=':
         case '==':
+        case 'like':
+        case 'ilike':
             return writeExpression(args[0]) + ' ' + operators[operator] + ' ' + writeExpression(args[1]);
         case '!':
             return 	writeExpression(args[0], { prefix: 'not ' });
@@ -901,6 +935,8 @@ function writeExpression(expression, options) {
                     .map(arg => writeExpression(arg))
                     .join('') +
                 ')';
+        case 'bool':
+            return args[0];
         case 'literal':
             return args[0].map(arg => writeExpression(arg)).join(', ');
         case 'measure':
@@ -908,6 +944,7 @@ function writeExpression(expression, options) {
         case 'recode':
         case 'categorize':
         case 'interpolate':
+        case 'color-map-entry':
         case 'env':
             return `${operator}(${args.map(arg => writeExpression(arg)).join(', ')})`;
         case 'url':
@@ -971,6 +1008,31 @@ function writeValue(values, isPseudoSelector) {
     return arrayValues.join(', ');
 }
 
+function ensureAnyAllWrapperOnSelector(selector) {
+    if (selector === '*') {
+        return '*';
+    }
+
+    const [operator, ...others] = selector;
+    if (operator !== 'any' && operator !== 'all') {
+        return ['any', ['all', selector]];
+    }
+    if (operator === 'all') {
+        return ['any', selector];
+    }
+    if (operator === 'any') {
+        const ensureAndChildren = others.map(arg => {
+            if (arg[0] !== 'all') {
+                return ['all', arg];
+            }
+            return arg;
+        });
+        return ['any', ...ensureAndChildren];
+    }
+
+    return '*';
+}
+
 function writeExpressions(rules) {
     return (rules || []).map((rule) => {
         const minScale = rule?.['min-scale'] && writeExpression(rule['min-scale']);
@@ -979,20 +1041,21 @@ function writeExpressions(rules) {
             ? rule.properties
             : [ rule.properties ];
         const propertiesKeys = Object.keys(propertiesGroups[0]);
+        const selector = ensureAnyAllWrapperOnSelector(rule.selector);
         return {
             ...(rule?.title && { title: `/* @title ${rule.title} */`}),
             ...(rule?.layer && { layer: rule.layer }),
-            selector: rule.selector?.[0] === 'any'
-                ? rule.selector
+            selector: selector?.[0] === 'any'
+                ? selector
                     .filter((or, idx) => idx > 0)
                     .map(or => [
                         ...or
                             .filter((and, idx) => idx > 0)
                             .map(and => '[' + writeExpression(and) + ']'),
-                            ...(minScale && ['[' + minScale + ']'] || []),
-                            ...(maxScale && ['[' +maxScale + ']'] || [])
+                        ...(minScale && ['[' + minScale + ']'] || []),
+                        ...(maxScale && ['[' +maxScale + ']'] || [])
                     ])
-                : rule.selector,
+                : selector,
             properties: propertiesKeys
                 .reduce((acc, key) => {
                     if (key.match(new RegExp(`(?:${PSEUDO_CLASS_SELECTOR}|${NUMBERED_PSEUDO_CLASS_SELECTOR})`))) {
@@ -1048,10 +1111,11 @@ function groupByLayer(rules) {
 }
 
 function writeRule(rule, options) {
-    const tab = options?.tab || '';
+    const baseTab = options?.baseTab || '';
+    const tab = options?.tab || '  ';
     const title = rule?.title && rule?.title + '\n' || '';
     const selector = rule?.selector
-    ? (rule.selector === '*' && '*' || rule.selector.map(or => tab + or.join('')).join(',\n'))
+    ? (rule.selector === '*' && '*' || rule.selector.map(or => baseTab + or.join('\n')).join(',\n'))
     : '';
     const properties = Object.keys(rule?.properties)
         .reduce((acc, key) => {
@@ -1059,31 +1123,32 @@ function writeRule(rule, options) {
                 const pseudoProperties = Object.keys(rule.properties[key])
                     .reduce((_acc, _key) => 
                         _acc + 
-                        tab + '\t\t' + _key + ': ' + rule.properties[key][_key] + ';\n'
+                        baseTab + tab + tab + _key + ': ' + rule.properties[key][_key] + ';\n'
                     , '');
                 return acc +
-                    tab + '\t' + key + ' {\n' +
+                    baseTab + tab + key + ' {\n' +
                         pseudoProperties +
-                    tab + '\t};\n';
+                    baseTab + tab + '};\n';
             }
             return acc +
-                tab + '\t' + key + ': ' + rule.properties[key] + ';\n';
+                baseTab + tab + key + ': ' + rule.properties[key] + ';\n';
         }, '');
-    return tab + title +
+    return baseTab + title +
         selector + ' {\n' +
         properties +
-        tab + '}\n';
+        baseTab + '}\n';
 }
 
 function writeRules(rules) {
+    const tab = '  ';
     return rules.reduce((acc, rule) => {
         if (rule.layer && rule.rules) {
             return acc +
             rule.layer + ' {\n' +
-                rule.rules.map(nestedRule => writeRule(nestedRule, { tab: '\t' })).join('') +
+                rule.rules.map(nestedRule => writeRule(nestedRule, { tab, baseTab: tab })).join('') +
             '}\n';
         }
-        return acc + writeRule(rule);
+        return acc + writeRule(rule, { tab });
     }, '');
 }
 
