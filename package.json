@@ -1,6 +1,6 @@
 {
   "name": "flat-geo-css",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "flat-geo-css",
   "main": "dist/flat-geo-css.js",
   "scripts": {
