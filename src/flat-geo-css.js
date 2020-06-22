@@ -799,7 +799,12 @@ function removeEmptyProperties(rules) {
 }
 
 function getPseudoSelectorByIndex(selector, idx) {
-    return Object.keys(selector).reduce((acc, key) => ({ ...acc, [key]: selector[key][idx] }), {});
+    return Object.keys(selector).reduce((acc, key) => ({
+        ...acc,
+        [key]: selector[key][idx] === undefined
+            ? selector[key][0]
+            : selector[key][idx]
+    }), {});
 }
 
 function splitProperties(rules) {
