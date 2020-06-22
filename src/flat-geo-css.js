@@ -949,7 +949,7 @@ function writeExpression(expression, options) {
             return `${operator}(${args.map(arg => writeExpression(arg)).join(', ')})`;
         case 'url':
         case 'symbol':
-            return `${operator}(${args[0]})`;
+            return `${operator}('${args[0]}')`;
         case 'get':
             return args[0];
         case 'brace':
