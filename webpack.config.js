@@ -4,9 +4,7 @@ const babelOptions = require('./babel.config');
 
 module.exports = {
     mode: 'production',
-    entry: {
-        'flat-geo-css': path.resolve(__dirname, 'index.js')
-    },
+    entry: [path.resolve(__dirname, 'index.js')],
     plugins: [
         new CleanWebpackPlugin()
     ],
@@ -23,9 +21,9 @@ module.exports = {
         ]
     },
     output: {
-        filename: '[name].js',
+        filename: 'flat-geo-css.js',
         path: path.resolve(__dirname, 'dist'),
-        library: '[name]',
+        library: 'flat-geo-css',
         libraryTarget: 'umd'
     }
 };

@@ -3,7 +3,6 @@
 // based on GeoTools CSSParser
 // https://github.com/geotools/geotools/blob/master/modules/unsupported/css/src/main/java/org/geotools/styling/css/CssParser.java
 
-import '@babel/polyfill';
 import moo from 'moo';
 
 const OPTIONAL_WHITESPACE = '(?:\r|\t|\f|\n| ){0,}';
